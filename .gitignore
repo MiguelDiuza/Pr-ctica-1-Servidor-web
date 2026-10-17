@@ -1,0 +1,20 @@
+# Secretos
+.env
+firmware/**/secrets.h
+
+# Datos generados en ejecución
+data/*
+!data/.gitkeep
+*.db
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editor / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

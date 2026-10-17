@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bodega de café</title>
+<style>
+  :root {
+    --bg: #f6f2ec; --card: #fffdf9; --text: #2b211a; --muted: #7a6a5c; --line: #e6ddd2;
+    --ok: #2f7d4f; --ok-bg: #e3f2e8; --alerta: #b4332b; --alerta-bg: #fbe5e2; --cafe: #6b4226;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1c1612; --card: #261e18; --text: #f1e9e1; --muted: #a8988a; --line: #3a2f27;
+      --ok: #6cc28f; --ok-bg: #1f3428; --alerta: #f08a80; --alerta-bg: #3d2120; --cafe: #d29a6c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 1.5rem; color: var(--cafe); }
+  .sub { color: var(--muted); margin: 2px 0 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin: 20px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .label { color: var(--muted); font-size: .85rem; }
+  .valor { font-size: 2.2rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .rango { color: var(--muted); font-size: .8rem; }
+  .estado { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 650; font-size: 1.1rem; margin-top: 6px; }
+  .OK { color: var(--ok); background: var(--ok-bg); }
+  .ALERTA { color: var(--alerta); background: var(--alerta-bg); }
+  .motivos { color: var(--alerta); font-size: .85rem; margin-top: 6px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: .85rem; }
+  .tabla { overflow-x: auto; }
+  a { color: var(--cafe); }
+  canvas { max-height: 300px; }
+  .vacio { color: var(--muted); text-align: center; padding: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Bodega de café pergamino</h1>
+      <p class="sub">Monitoreo de temperatura y humedad · ESP32 + DHT22</p>
+    </div>
+    <div class="sub"><span id="actualizado">—</span> · <a href="/api/lecturas.csv">Descargar CSV</a> · <a href="/docs">API</a></div>
+  </header>
+
+  <section class="grid">
+    <div class="card">
+      <div class="label">Temperatura</div>
+      <div class="valor" id="temp">—</div>
+      <div class="rango" id="rango-temp"></div>
+    </div>
+    <div class="card">
+      <div class="label">Humedad relativa</div>
+      <div class="valor" id="hum">—</div>
+      <div class="rango" id="rango-hum"></div>
+    </div>
+    <div class="card">
+      <div class="label">Estado</div>
+      <div><span class="estado" id="estado">sin datos</span></div>
+      <div class="motivos" id="motivos"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="label">Últimas lecturas</div>
+    <canvas id="grafica"></canvas>
+  </section>
+
+  <section class="card tabla" style="margin-top:14px">
+    <table>
+      <thead><tr><th>Fecha</th><th>Dispositivo</th><th>Temp (°C)</th><th>Humedad (%)</th><th>Estado</th></tr></thead>
+      <tbody id="filas"><tr><td colspan="5" class="vacio">Esperando datos del ESP32…</td></tr></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const fmt = new Intl.DateTimeFormat("es-CO", { dateStyle: "short", timeStyle: "medium", timeZone: "America/Bogota" });
+const hora = new Intl.DateTimeFormat("es-CO", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZone: "America/Bogota" });
+let grafica;
+
+function escapar(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+function color(nombre) { return getComputedStyle(document.documentElement).getPropertyValue(nombre).trim(); }
+
+async function cargarUmbrales() {
+  const u = await (await fetch("/api/umbrales")).json();
+  document.getElementById("rango-temp").textContent = `OK: ${u.temp_min} – ${u.temp_max} °C`;
+  document.getElementById("rango-hum").textContent = `OK: ${u.hum_min} – ${u.hum_max} % (más de ${u.hum_max} % = riesgo de moho)`;
+}
+
+function pintar(lecturas) {
+  document.getElementById("actualizado").textContent = "Actualizado " + fmt.format(new Date());
+  if (!lecturas.length) return;
+  const ultima = lecturas[0];
+  document.getElementById("temp").textContent = ultima.temperatura.toFixed(1) + " °C";
+  document.getElementById("hum").textContent = ultima.humedad.toFixed(1) + " %";
+  const est = document.getElementById("estado");
+  est.textContent = ultima.estado;
+  est.className = "estado " + ultima.estado;
+  document.getElementById("motivos").textContent = ultima.motivos.join(" · ");
+
+  const filas = lecturas.slice(0, 20).map(l => `<tr>
+    <td>${fmt.format(new Date(l.fecha))}</td><td>${escapar(l.dispositivo)}</td>
+    <td>${l.temperatura.toFixed(1)}</td><td>${l.humedad.toFixed(1)}</td>
+    <td><span class="estado ${l.estado}" style="font-size:.8rem;margin:0">${l.estado}</span></td></tr>`);
+  document.getElementById("filas").innerHTML = filas.join("");
+
+  if (typeof Chart === "undefined") return;  // sin internet no hay gráfica, el resto funciona
+  const orden = [...lecturas].reverse();
+  const etiquetas = orden.map(l => hora.format(new Date(l.fecha)));
+  if (!grafica) {
+    grafica = new Chart(document.getElementById("grafica"), {
+      type: "line",
+      data: { labels: [], datasets: [
+        { label: "Temperatura (°C)", data: [], borderColor: color("--cafe"), yAxisID: "t", tension: .3, pointRadius: 0 },
+        { label: "Humedad (%)", data: [], borderColor: "#3b82c4", yAxisID: "h", tension: .3, pointRadius: 0 },
+      ]},
+      options: { animation: false, interaction: { mode: "index", intersect: false },
+        scales: { t: { position: "left", title: { display: true, text: "°C" } },
+                  h: { position: "right", min: 0, max: 100, title: { display: true, text: "%" }, grid: { drawOnChartArea: false } } } },
+    });
+  }
+  grafica.data.labels = etiquetas;
+  grafica.data.datasets[0].data = orden.map(l => l.temperatura);
+  grafica.data.datasets[1].data = orden.map(l => l.humedad);
+  grafica.update();
+}
+
+async function refrescar() {
+  try { pintar(await (await fetch("/api/lecturas?limite=100")).json()); }
+  catch (e) { document.getElementById("actualizado").textContent = "Sin conexión con el servidor"; }
+}
+
+cargarUmbrales();
+refrescar();
+setInterval(refrescar, 5000);
+</script>
+</body>
+</html>
